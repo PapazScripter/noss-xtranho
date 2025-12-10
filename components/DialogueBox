@@ -1,1 +1,47 @@
+import React, { useEffect, useState, useRef } from 'react';
+
+interface DialogueBoxProps {
+  text: string;
+  sender: string;
+  isTyping?: boolean;
+}
+
+export const DialogueBox: React.FC<DialogueBoxProps> = ({ text, sender, isTyping }) => {
+  const [displayedText, setDisplayedText] = useState('');
+  const [index, setIndex] = useState(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setDisplayedText('');
+    setIndex(0);
+  }, [text]);
+
+  useEffect(() => {
+    if (index < text.length) {
+      const timeoutId = setTimeout(() => {
+        setDisplayedText((prev) => prev + text.charAt(index));
+        setIndex((prev) => prev + 1);
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+      }, 30); // Typing speed
+      return () => clearTimeout(timeoutId);
+    }
+  }, [index, text]);
+
+  return (
+    <div className="border-2 border-white bg-black/80 p-4 font-mono text-green-400 h-full flex flex-col relative shadow-[0_0_15px_rgba(0,255,0,0.2)]">
+      <div className="absolute top-0 left-0 bg-white text-black px-2 text-sm font-bold uppercase tracking-wider">
+        {sender}
+      </div>
+      <div 
+        ref={scrollRef}
+        className="mt-6 text-lg md:text-xl leading-relaxed overflow-y-auto no-scrollbar"
+      >
+        {displayedText}
+        {(index < text.length || isTyping) && <span className="animate-pulse">_</span>}
+      </div>
+    </div>
+  );
+};
 
