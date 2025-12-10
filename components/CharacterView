@@ -1,1 +1,64 @@
 
+import React from 'react';
+import { CharacterData } from '../types';
+
+interface CharacterViewProps {
+  character: CharacterData;
+  isScanning: boolean;
+  anomalyType?: string | null;
+  mode: 'door' | 'room';
+  capturedImage?: string; // Optional prop for Agent X logic
+}
+
+export const CharacterView: React.FC<CharacterViewProps> = ({ character, isScanning, anomalyType, mode, capturedImage }) => {
+  const hasVisualDistortion = anomalyType === 'visual_distortion';
+  const isDoor = mode === 'door';
+
+  return (
+    <div className={`relative w-full h-full flex items-end justify-center overflow-hidden ${isDoor ? 'bg-black/50 border-r-2 border-white/20' : ''}`}>
+      
+      {/* CAPTURED RESIDENT (Appears behind/beside Agent X) */}
+      {capturedImage && (
+        <div className="absolute left-[10%] bottom-0 h-[70%] w-[40%] z-0 opacity-80 animate-pulse transform -rotate-3">
+            <img 
+              src={capturedImage} 
+              alt="Captured Resident" 
+              className="w-full h-full object-contain grayscale contrast-125"
+            />
+            {/* Bars Overlay to imply cage/capture */}
+            <div className="absolute inset-0 bg-[linear-gradient(90deg,transparent_10%,rgba(0,0,0,0.8)_15%,transparent_20%)] bg-[length:20px_100%]"></div>
+        </div>
+      )}
+
+      {/* Main Character Image */}
+      <img 
+        src={character.imageUrl} 
+        alt={character.name} 
+        className={`
+          z-10
+          transition-all duration-500
+          ${isDoor 
+             ? 'max-h-[90%] max-w-[95%] object-contain filter contrast-125 brightness-75 sepia-[0.3]' 
+             : 'max-h-[85%] max-w-[90%] object-contain filter contrast-110 brightness-90' // Room mode: clearer but still atmospheric
+          }
+          ${isScanning ? 'scale-110 brightness-125 sepia-0 blur-[1px] hue-rotate-15' : 'scale-100'}
+          ${hasVisualDistortion && !isScanning ? 'visual-distortion' : ''}
+        `}
+      />
+
+      {/* Scanning Overlay Effect */}
+      {isScanning && (
+        <div className="absolute inset-0 z-20 pointer-events-none">
+          <div className="absolute top-1/2 left-0 w-full h-0.5 bg-red-500 shadow-[0_0_15px_rgba(255,0,0,1)] animate-ping opacity-50"></div>
+          <div className="absolute inset-0 border-4 border-red-500/30 animate-pulse"></div>
+          <div className="absolute bottom-10 left-10 text-red-500 font-mono text-xs">
+            ANALISANDO BIOMETRIA...<br/>
+            ERRO: ANOMALIA DETECTADA<br/>
+            INCERTEZA: 84%
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
