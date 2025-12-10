@@ -1,1 +1,539 @@
 
+
+
+
+
+// Procedural Audio Service for Horror Ambience
+// Uses Web Audio API to generate drones, hums, and noise without external files.
+
+let audioCtx: AudioContext | null = null;
+let currentNodes: AudioNode[] = [];
+let gainNode: GainNode | null = null;
+let musicPlayer: HTMLAudioElement | null = null;
+
+export const initAudio = () => {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(() => {});
+  }
+};
+
+const cleanUp = () => {
+  if (currentNodes.length > 0) {
+    currentNodes.forEach(node => {
+      try {
+        node.disconnect();
+        if ((node as any).stop) (node as any).stop();
+      } catch (e) { /* ignore */ }
+    });
+    currentNodes = [];
+  }
+  if (gainNode) {
+    gainNode.disconnect();
+    gainNode = null;
+  }
+};
+
+export const playMusic = (url: string) => {
+  if (musicPlayer) {
+    musicPlayer.pause();
+    musicPlayer = null;
+  }
+  musicPlayer = new Audio(url);
+  musicPlayer.volume = 0.5;
+  musicPlayer.loop = true;
+  musicPlayer.play().catch(e => console.error("Music play failed", e));
+};
+
+export const stopMusic = () => {
+  if (musicPlayer) {
+    musicPlayer.pause();
+    musicPlayer = null;
+  }
+};
+
+const createPinkNoise = (ctx: AudioContext) => {
+  const bufferSize = 2 * ctx.sampleRate;
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+  const output = buffer.getChannelData(0);
+  let b0, b1, b2, b3, b4, b5, b6;
+  b0 = b1 = b2 = b3 = b4 = b5 = b6 = 0.0;
+  for (let i = 0; i < bufferSize; i++) {
+    const white = Math.random() * 2 - 1;
+    b0 = 0.99886 * b0 + white * 0.0555179;
+    b1 = 0.99332 * b1 + white * 0.0750759;
+    b2 = 0.96900 * b2 + white * 0.1538520;
+    b3 = 0.86650 * b3 + white * 0.3104856;
+    b4 = 0.55000 * b4 + white * 0.5329522;
+    b5 = -0.7616 * b5 - white * 0.0168980;
+    output[i] = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
+    output[i] *= 0.11; // (roughly) compensate for gain
+    b6 = white * 0.115926;
+  }
+  const noise = ctx.createBufferSource();
+  noise.buffer = buffer;
+  noise.loop = true;
+  return noise;
+};
+
+// Play a synthesized electric guitar note
+export const playGuitarString = (frequency: number) => {
+  initAudio();
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  
+  // Master gain for this note
+  const masterGain = audioCtx.createGain();
+  masterGain.connect(audioCtx.destination);
+  masterGain.gain.setValueAtTime(0.3, t);
+  masterGain.gain.exponentialRampToValueAtTime(0.001, t + 1.5); // Sustain
+
+  // Oscillator (Sawtooth provides brightness)
+  const osc = audioCtx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(frequency, t);
+
+  // Filter (Lowpass envelop simulates the pluck and string damping)
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(2000, t);
+  filter.frequency.exponentialRampToValueAtTime(100, t + 0.5); // Filter decay
+  filter.Q.value = 5; // Resonance
+
+  // Distortion (Wave shaper)
+  const distortion = audioCtx.createWaveShaper();
+  const makeDistortionCurve = (amount: number) => {
+    const k = typeof amount === 'number' ? amount : 50,
+      n_samples = 44100,
+      curve = new Float32Array(n_samples),
+      deg = Math.PI / 180;
+    for (let i = 0; i < n_samples; ++i) {
+      const x = (i * 2) / n_samples - 1;
+      curve[i] = (3 + k) * x * 20 * deg / (Math.PI + k * Math.abs(x));
+    }
+    return curve;
+  };
+  distortion.curve = makeDistortionCurve(200); // Amount of distortion
+  distortion.oversample = '4x';
+
+  // Connections
+  osc.connect(distortion);
+  distortion.connect(filter);
+  filter.connect(masterGain);
+
+  osc.start(t);
+  osc.stop(t + 1.5);
+};
+
+export const playSFX = (type: 'click' | 'error' | 'success' | 'drink' | 'scan' | 'typing' | 'knock' | 'shoot' | 'intro_boom' | 'shovel' | 'jumpscare_loud') => {
+  initAudio();
+  if (!audioCtx) return;
+
+  const t = audioCtx.currentTime;
+  const sfxGain = audioCtx.createGain();
+  sfxGain.connect(audioCtx.destination);
+
+  switch (type) {
+    case 'click': {
+      // High pitch short blip
+      const osc = audioCtx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(800, t);
+      osc.frequency.exponentialRampToValueAtTime(100, t + 0.1);
+      
+      sfxGain.gain.setValueAtTime(0.1, t);
+      sfxGain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
+      
+      osc.connect(sfxGain);
+      osc.start(t);
+      osc.stop(t + 0.1);
+      break;
+    }
+    case 'error': {
+      // Low buzz / Denied sound
+      const osc = audioCtx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(150, t);
+      osc.frequency.linearRampToValueAtTime(50, t + 0.3);
+
+      sfxGain.gain.setValueAtTime(0.15, t);
+      sfxGain.gain.linearRampToValueAtTime(0, t + 0.3);
+
+      osc.connect(sfxGain);
+      osc.start(t);
+      osc.stop(t + 0.3);
+      break;
+    }
+    case 'success': {
+      // Ascending chime / Unlock
+      const osc = audioCtx.createOscillator();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(440, t); // A4
+      osc.frequency.setValueAtTime(554, t + 0.1); // C#5
+      osc.frequency.setValueAtTime(659, t + 0.2); // E5
+
+      sfxGain.gain.setValueAtTime(0.05, t);
+      sfxGain.gain.linearRampToValueAtTime(0, t + 0.4);
+
+      osc.connect(sfxGain);
+      osc.start(t);
+      osc.stop(t + 0.4);
+      break;
+    }
+    case 'drink': {
+        // Gulp sound (Filtered noise sweep)
+        const noise = createPinkNoise(audioCtx);
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(600, t);
+        filter.frequency.exponentialRampToValueAtTime(100, t + 0.3);
+        
+        sfxGain.gain.setValueAtTime(0.2, t);
+        sfxGain.gain.linearRampToValueAtTime(0, t + 0.3);
+
+        noise.connect(filter);
+        filter.connect(sfxGain);
+        noise.start(t);
+        noise.stop(t + 0.3);
+        break;
+    }
+    case 'scan': {
+        // High pitch data noise
+        const osc = audioCtx.createOscillator();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(2000, t);
+        
+        const lfo = audioCtx.createOscillator();
+        lfo.type = 'square';
+        lfo.frequency.value = 15;
+        const lfoGain = audioCtx.createGain();
+        lfoGain.gain.value = 1000;
+        
+        lfo.connect(lfoGain);
+        lfoGain.connect(osc.frequency);
+        lfo.start(t);
+
+        sfxGain.gain.setValueAtTime(0.05, t);
+        sfxGain.gain.linearRampToValueAtTime(0, t + 0.5);
+
+        osc.connect(sfxGain);
+        osc.start(t);
+        osc.stop(t + 0.5);
+        break;
+    }
+    case 'typing': {
+        // Very subtle tick
+        const noise = createPinkNoise(audioCtx);
+        sfxGain.gain.setValueAtTime(0.03, t);
+        sfxGain.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
+        
+        noise.connect(sfxGain);
+        noise.start(t);
+        noise.stop(t + 0.03);
+        break;
+    }
+    case 'knock': {
+        // 3 muffled thuds using lowpass filtered oscillators
+        for(let i=0; i<3; i++) {
+            const t_offset = t + (i * 0.2); // Time spacing between knocks
+            
+            const osc = audioCtx.createOscillator();
+            osc.type = 'square'; // Square wave filtered sounds woody/hollow
+            osc.frequency.setValueAtTime(80, t_offset);
+            osc.frequency.exponentialRampToValueAtTime(0.01, t_offset + 0.1);
+            
+            const g = audioCtx.createGain();
+            g.gain.setValueAtTime(0.5, t_offset);
+            g.gain.exponentialRampToValueAtTime(0.01, t_offset + 0.1);
+  
+            const f = audioCtx.createBiquadFilter();
+            f.type = 'lowpass';
+            f.frequency.value = 120; // Heavy muffling
+  
+            osc.connect(f);
+            f.connect(g);
+            g.connect(audioCtx.destination);
+            
+            osc.start(t_offset);
+            osc.stop(t_offset + 0.12);
+        }
+        break;
+    }
+    case 'shoot': {
+        // Gunshot: Noise burst with quick decay + low thud
+        const noise = createPinkNoise(audioCtx);
+        const noiseGain = audioCtx.createGain();
+        
+        noiseGain.gain.setValueAtTime(0.8, t);
+        noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
+        
+        noise.connect(noiseGain);
+        noiseGain.connect(sfxGain);
+        noise.start(t);
+        noise.stop(t + 0.25);
+        
+        // Low impact thud
+        const thud = audioCtx.createOscillator();
+        thud.type = 'square';
+        thud.frequency.setValueAtTime(150, t);
+        thud.frequency.exponentialRampToValueAtTime(40, t + 0.2);
+        
+        const thudGain = audioCtx.createGain();
+        thudGain.gain.setValueAtTime(0.8, t);
+        thudGain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
+        
+        thud.connect(thudGain);
+        thudGain.connect(sfxGain);
+        thud.start(t);
+        thud.stop(t + 0.25);
+        break;
+    }
+    case 'intro_boom': {
+        // Low Sine Drop
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(150, t);
+        osc.frequency.exponentialRampToValueAtTime(30, t + 2);
+        
+        const g = audioCtx.createGain();
+        g.gain.setValueAtTime(0.8, t);
+        g.gain.exponentialRampToValueAtTime(0.01, t + 2.5);
+        
+        osc.connect(g);
+        g.connect(audioCtx.destination);
+        osc.start(t);
+        osc.stop(t + 2.5);
+
+        // Noise Burst
+        const noise = createPinkNoise(audioCtx);
+        const ng = audioCtx.createGain();
+        ng.gain.setValueAtTime(0.5, t);
+        ng.gain.exponentialRampToValueAtTime(0.01, t + 0.5);
+        
+        noise.connect(ng);
+        ng.connect(audioCtx.destination);
+        noise.start(t);
+        noise.stop(t + 0.5);
+        break;
+    }
+    case 'shovel': {
+        // Digging sound: Low noise puff + gravel scratch
+        const noise = createPinkNoise(audioCtx);
+        const noiseGain = audioCtx.createGain();
+        const filter = audioCtx.createBiquadFilter();
+        
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(300, t);
+        filter.frequency.linearRampToValueAtTime(100, t + 0.4);
+
+        noiseGain.gain.setValueAtTime(0.4, t);
+        noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 0.5);
+
+        noise.connect(filter);
+        filter.connect(noiseGain);
+        noiseGain.connect(sfxGain);
+        
+        noise.start(t);
+        noise.stop(t + 0.6);
+        break;
+    }
+    case 'jumpscare_loud': {
+        // Extremely loud, dissonant screeching for game over
+        const osc1 = audioCtx.createOscillator();
+        osc1.type = 'sawtooth';
+        osc1.frequency.setValueAtTime(400, t);
+        osc1.frequency.linearRampToValueAtTime(800, t + 0.5);
+
+        const osc2 = audioCtx.createOscillator();
+        osc2.type = 'square';
+        osc2.frequency.setValueAtTime(410, t); // Dissonant
+        osc2.frequency.linearRampToValueAtTime(850, t + 0.5);
+
+        const noise = createPinkNoise(audioCtx);
+
+        // Main gain (Very Loud)
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(0, t);
+        gain.gain.linearRampToValueAtTime(0.8, t + 0.05); // Immediate attack
+        gain.gain.exponentialRampToValueAtTime(0.01, t + 2.0);
+
+        osc1.connect(gain);
+        osc2.connect(gain);
+        noise.connect(gain);
+        
+        gain.connect(audioCtx.destination);
+        
+        osc1.start(t);
+        osc1.stop(t + 2.0);
+        osc2.start(t);
+        osc2.stop(t + 2.0);
+        noise.start(t);
+        noise.stop(t + 2.0);
+        break;
+    }
+  }
+};
+
+export const playAmbience = (type: 'living_room' | 'bedroom' | 'kitchen' | 'door' | 'basement' | 'cemetery') => {
+  initAudio();
+  if (!audioCtx) return;
+
+  // Cleanup previous sounds
+  cleanUp();
+
+  gainNode = audioCtx.createGain();
+  gainNode.connect(audioCtx.destination);
+  
+  const now = audioCtx.currentTime;
+
+  // Fade in
+  gainNode.gain.setValueAtTime(0, now);
+  gainNode.gain.linearRampToValueAtTime(0.2, now + 2); // 2s fade in, keep volume low (0.2)
+
+  if (type === 'living_room' || type === 'basement') {
+    // Dark Drone: Low oscillating sine waves + Filtered Noise (Creaking atmosphere)
+    const osc1 = audioCtx.createOscillator();
+    const osc2 = audioCtx.createOscillator();
+    const lfo = audioCtx.createOscillator();
+    const lfoGain = audioCtx.createGain();
+
+    osc1.type = 'triangle';
+    osc1.frequency.value = 55; // Low A
+    
+    osc2.type = 'sine';
+    osc2.frequency.value = 58; // Slight dissonance
+
+    lfo.type = 'sine';
+    lfo.frequency.value = 0.1; // Slow modulation
+    lfoGain.gain.value = 50; 
+
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc1.frequency);
+    
+    osc1.connect(gainNode);
+    osc2.connect(gainNode);
+
+    osc1.start();
+    osc2.start();
+    lfo.start();
+
+    // Subtle Noise floor (Room tone)
+    const noise = createPinkNoise(audioCtx);
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 150;
+    noise.connect(filter);
+    filter.connect(gainNode);
+    noise.start();
+
+    currentNodes.push(osc1, osc2, lfo, lfoGain, noise, filter);
+  } 
+  else if (type === 'bedroom') {
+    // Hollow Wind: Bandpass Filtered Noise
+    const noise = createPinkNoise(audioCtx);
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 400;
+    filter.Q.value = 1;
+
+    // Modulate the wind filter
+    const lfo = audioCtx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.value = 0.2;
+    const lfoGain = audioCtx.createGain();
+    lfoGain.gain.value = 200;
+
+    lfo.connect(lfoGain);
+    lfoGain.connect(filter.frequency);
+
+    noise.connect(filter);
+    filter.connect(gainNode);
+    noise.start();
+    lfo.start();
+
+    currentNodes.push(noise, filter, lfo, lfoGain);
+  }
+  else if (type === 'kitchen') {
+    // Fridge Hum: 60Hz + High pitch whine
+    const hum = audioCtx.createOscillator();
+    hum.type = 'sawtooth';
+    hum.frequency.value = 60;
+    
+    const humFilter = audioCtx.createBiquadFilter();
+    humFilter.type = 'lowpass';
+    humFilter.frequency.value = 120;
+
+    // High frequency whine (coil noise)
+    const whine = audioCtx.createOscillator();
+    whine.type = 'sine';
+    whine.frequency.value = 8000;
+    const whineGain = audioCtx.createGain();
+    whineGain.gain.value = 0.02; // Very quiet
+
+    hum.connect(humFilter);
+    humFilter.connect(gainNode);
+    
+    whine.connect(whineGain);
+    whineGain.connect(gainNode);
+
+    hum.start();
+    whine.start();
+
+    currentNodes.push(hum, humFilter, whine, whineGain);
+  }
+  else if (type === 'door') {
+      // Outdoor ambience: Low traffic rumble
+      const noise = createPinkNoise(audioCtx);
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 200;
+      
+      noise.connect(filter);
+      filter.connect(gainNode);
+      noise.start();
+
+      currentNodes.push(noise, filter);
+  }
+  else if (type === 'cemetery') {
+      // Cemetery: Windy + Ghostly High Freq
+      const noise = createPinkNoise(audioCtx);
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.value = 800; // Thin wind
+      
+      // Wind modulation
+      const lfo = audioCtx.createOscillator();
+      lfo.frequency.value = 0.5;
+      const lfoGain = audioCtx.createGain();
+      lfoGain.gain.value = 300;
+      lfo.connect(lfoGain);
+      lfoGain.connect(filter.frequency);
+      lfo.start();
+
+      noise.connect(filter);
+      filter.connect(gainNode);
+      noise.start();
+
+      currentNodes.push(noise, filter, lfo, lfoGain);
+  }
+};
+
+export const stopAmbience = () => {
+  if (gainNode && audioCtx) {
+    // Fade out
+    const now = audioCtx.currentTime;
+    try {
+        gainNode.gain.cancelScheduledValues(now);
+        gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+        gainNode.gain.linearRampToValueAtTime(0, now + 1);
+    } catch(e) {}
+    
+    setTimeout(() => {
+      cleanUp();
+    }, 1000);
+  } else {
+    cleanUp();
+  }
+};
